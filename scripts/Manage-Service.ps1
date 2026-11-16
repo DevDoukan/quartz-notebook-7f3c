@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][ValidateSet('Install','Remove','Status')][string]$Action,[string]$AppRoot)
+param([Parameter(Mandatory=$true)][ValidateSet('Install','Remove','Status','StopForRepair','ResumeAfterRepair')][string]$Action,[string]$AppRoot)
 $ErrorActionPreference='Stop'
 $name='KalkanDlpAgent'
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -15,6 +15,21 @@ function Get-OwnService {
 if($Action -eq 'Status'){Get-OwnService | Select-Object Name,State,StartMode,StartName,PathName | ConvertTo-Json;exit}
 if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'An elevated Windows administrator is required.'}
 $existing=Get-OwnService
+$repairActions=@('StopForRepair','ResumeAfterRepair')
+if($Action -in $repairActions){
+ if(-not $existing){exit 3}
+ $expectedImage='"'+(Join-Path $AppRoot 'agent\KalkanDlpAgent.exe')+'" --config "'+$config+'"'
+ if($existing.PathName -ine $expectedImage){exit 3}
+ if($existing.StartName -ne 'NT SERVICE\KalkanDlpAgent'){throw 'Unexpected agent service account.'}
+ if($Action -eq 'StopForRepair'){
+  if($existing.State -eq 'Stopped'){exit 3}
+  if($existing.State -ne 'Running'){throw 'Wait until the agent service is running or stopped before repairing it.'}
+  Stop-Service -Name $name -ErrorAction Stop
+ }elseif($existing.State -eq 'Stopped'){
+  Start-Service -Name $name -ErrorAction Stop
+ }
+ exit 0
+}
 $productKey='HKLM:\Software\KalkanDLP'
 if($Action -eq 'Remove'){
  if($existing){Stop-Service -Name $name -Force -ErrorAction Stop;$result=Invoke-CimMethod -InputObject (Get-OwnService) -MethodName Delete;if($result.ReturnValue -ne 0){throw 'Service removal failed.'}}

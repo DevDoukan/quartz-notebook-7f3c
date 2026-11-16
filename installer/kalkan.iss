@@ -74,6 +74,9 @@ Name: "startup"; Description: "Windows oturumu açıldığında arka planda baş
 #endif
 
 [Files]
+#ifdef MachineInstall
+Source: "{#StageDir}\scripts\Manage-Service.ps1"; DestName: "Kalkan-Agent-Repair.ps1"; Flags: dontcopy
+#endif
 Source: "{#StageDir}\*"; DestDir: "{app}\versions\{#ProductVersion}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -133,7 +136,33 @@ end;
 #endif
 
 #ifdef MachineInstall
-var ServiceInstallFailed: Boolean;
+var ServiceInstallFailed, AgentStoppedForRepair: Boolean;
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var Code: Integer; Current, Target: String;
+begin
+  Result := '';
+  Target := ExpandConstant('{app}\versions\{#ProductVersion}');
+  if RegQueryStringValue(HKLM, 'Software\KalkanDLP', 'CurrentPath', Current) and
+     (CompareText(Current, Target) = 0) then
+  begin
+    { The installed script may predate the repair actions. Extract the new
+      script before copying files that the running agent holds open. }
+    if not FileExists(ExpandConstant('{tmp}\Kalkan-Agent-Repair.ps1')) then
+      ExtractTemporaryFile('Kalkan-Agent-Repair.ps1');
+    if not ExecAndLogOutputWithNativeSysDir(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), ExpandConstant('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{tmp}\Kalkan-Agent-Repair.ps1" -Action StopForRepair -AppRoot "{app}\versions\{#ProductVersion}"'), '', SW_HIDE, ewWaitUntilTerminated, Code, nil) or
+       ((Code <> 0) and (Code <> 3)) then
+      Result := 'Windows ajani onarim icin durdurulamadi.'
+    else if Code = 0 then
+      AgentStoppedForRepair := True;
+  end;
+end;
+procedure DeinitializeSetup();
+var Code: Integer;
+begin
+  if AgentStoppedForRepair and not ClientServiceInstalled then
+    if not ExecAndLogOutputWithNativeSysDir(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), ExpandConstant('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{tmp}\Kalkan-Agent-Repair.ps1" -Action ResumeAfterRepair -AppRoot "{app}\versions\{#ProductVersion}"'), '', SW_HIDE, ewWaitUntilTerminated, Code, nil) or (Code <> 0) then
+      Log('Windows ajani onarim iptalinden sonra yeniden baslatilamadi.');
+end;
 function GetCustomSetupExitCode(): Integer;
 begin
   if ServiceInstallFailed then Result := 1 else Result := 0;
