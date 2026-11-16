@@ -1,0 +1,2 @@
+Bu dosya toplantı gündemini içerir.
+Gündem: proje planı ve tasarım değerlendirmesi.

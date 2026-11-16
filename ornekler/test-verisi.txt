@@ -1,0 +1,5 @@
+KALKAN DLP - ÖRNEK TEST DOSYASI
+Bu dosya yalnızca uygulamayı denemek için örnek içerik taşır.
+Genel test kartı: 4242 4242 4242 4242
+Örnek e-posta: deneme@example.com
+Sınıflandırma: çok gizli

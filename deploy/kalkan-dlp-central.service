@@ -1,0 +1,25 @@
+[Unit]
+Description=Kalkan DLP Central
+After=network.target
+
+[Service]
+Type=simple
+User=kalkan-dlp
+Group=kalkan-dlp
+WorkingDirectory=/opt/kalkan-dlp
+Environment=DLP_CENTRAL_SERVICE=systemd
+Environment=DLP_CENTRAL_SERVER_CONFIG=/etc/kalkan-dlp/server-config.json
+ExecStart=/usr/bin/node /opt/kalkan-dlp/central-server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+StateDirectory=kalkan-dlp
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

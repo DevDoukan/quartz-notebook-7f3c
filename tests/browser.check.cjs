@@ -1,0 +1,71 @@
+const {chromium}=require('playwright');
+const {createApp}=require('../server');
+const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),http=require('node:http');
+(async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'kalkan-browser-')),screens=path.join(__dirname,'..','.test-artifacts');await fs.mkdir(screens,{recursive:true});
+  const input=path.join(root,'input');await fs.mkdir(input);await fs.writeFile(path.join(input,'data.txt'),'Card: 4242 4242 4242 4242');
+  const brokerPath=path.join(__dirname,'..','.build','agent','KalkanFileBroker.exe');
+  if(!require('node:fs').existsSync(brokerPath)){const result=require('node:child_process').spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'..','tools','build-agent.ps1')],{stdio:'inherit',windowsHide:true});assert.equal(result.status,0);}
+  let deviceStatus={devices:[],supported:true,writeProtected:false};
+  const app=createApp({dataDir:path.join(root,'data'),deviceProvider:async()=>deviceStatus,env:{...process.env,DLP_AGENT_MODE:'service',DLP_AGENT_CONSOLE_TEST:'1'},agentBrokerPath:brokerPath});
+  let browser,profile,formServer,appClosed=false;
+  try{
+    await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});
+    browser=await chromium.launch({channel:process.env.DLP_BROWSER_CHANNEL||'msedge',headless:true});
+    const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
+    page.on('pageerror',e=>errors.push(e.message));
+    await page.goto('http://127.0.0.1:'+app.server.address().port);
+    await page.locator('#auth-screen').waitFor({state:'visible'});await page.screenshot({path:path.join(screens,'first-run.png'),fullPage:true});
+    await page.locator('#auth-setup-key').fill(await fs.readFile(path.join(root,'data','setup-key.txt'),'utf8'));
+    await page.locator('#auth-username').fill('testadmin');await page.locator('#auth-password').fill('Test-password-2026');await page.locator('#auth-submit').click();
+    await page.waitForFunction(()=>document.getElementById('auth-screen').hidden&&document.getElementById('metric-mode').textContent.includes('etkin'));
+    await page.locator('a[data-page=system]').click();assert.match(await page.locator('#agent-mode').innerText(),/test kipinde/);await page.locator('#agent-roots').fill(input);await page.locator('#agent-root-form button.primary').click();await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('Güvenilen klasörler kaydedildi'));await page.locator('a[data-page=overview]').click();
+    await page.screenshot({path:path.join(screens,'dashboard.png'),fullPage:true});
+    await page.locator('a[data-page=channels]').click();await page.locator('#sample-content').click();await page.locator('#channel-form button.primary').click();await page.waitForFunction(()=>!document.getElementById('channel-result').hidden);assert.match(await page.locator('#channel-result').innerText(),/Uyarı/);
+    await page.locator('a[data-page=policy]').click();await page.locator('[name=mode][value=block]').check();for(const checkbox of await page.locator('[name=rule]').all())await checkbox.uncheck();await page.locator('#rule-card').check();await page.locator('#policy-form button.primary').click();await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('Politika kaydedildi'));
+    await page.reload();await page.waitForFunction(()=>document.getElementById('metric-mode').textContent.includes('Engelleme'));assert.equal(await page.locator('#rule-card').isChecked(),true);assert.equal(await page.locator('#rule-email').isChecked(),false);
+    await page.locator('a[data-page=channels]').click();await page.locator('#sample-content').click();await page.locator('#channel-form button.primary').click();await page.waitForFunction(()=>document.getElementById('channel-result').innerText.includes('Engellendi'));
+    await page.locator('a[data-page=scan]').click();await page.locator('#scan-path').fill(input);await page.locator('#scan-start').click();await page.waitForFunction(()=>document.getElementById('scan-result').innerText.includes('1 dosyada hassas veri bulgusu'));await page.screenshot({path:path.join(screens,'scan.png'),fullPage:true});
+    const downloadPromise=page.waitForEvent('download');await page.locator('#download-report').click();const download=await downloadPromise;assert.match(download.suggestedFilename(),/kalkan-tarama/);await download.saveAs(path.join(screens,'report.json'));
+    await page.locator('#scan-history [data-scan-id]').first().click();await page.reload();await page.waitForFunction(()=>document.getElementById('auth-screen').hidden&&document.getElementById('scan-result').innerText.includes('1 dosyada hassas veri bulgusu'));
+    await page.locator('#scan-path').fill(path.join(input,'missing'));await page.locator('#scan-start').click();await page.waitForFunction(()=>document.getElementById('notice').textContent.includes('Klasör bulunamadı'));
+    await page.locator('a[data-page=usb]').click();await page.waitForFunction(()=>document.getElementById('devices').innerText.includes('Bağlı USB'));assert.match(await page.locator('#protection-status').innerText(),/Kapalı/);
+    deviceStatus={devices:[],supported:true,writeProtected:null,writeProtectionKnown:false,warning:'Koruma durumu okunamadı.'};await page.locator('#devices-refresh').click();await page.waitForFunction(()=>document.getElementById('protection-status').textContent.includes('Bilinmiyor'));assert.match(await page.locator('#devices').innerText(),/Koruma durumu okunamadı/);
+    deviceStatus={devices:[],supported:false,writeProtected:false};await page.locator('#devices-refresh').click();await page.waitForFunction(()=>document.getElementById('protection-status').textContent.includes('Desteklenmiyor'));
+    await page.locator('a[data-page=events]').click();assert.match(await page.locator('#all-events').innerText(),/engellendi|bulgu/i);
+    app.store.saveScan({id:'pagination-test',finishedAt:new Date().toISOString(),root:'Test: büyük rapor',files:60,errors:0,skipped:0,durationMs:1,issues:[],findings:Array.from({length:60},(_,i)=>({file:'test-file-'+i+'.txt',matches:[{type:'card',label:'Kredi kartı',line:1,severity:'high'}]}))});
+    await page.locator('a[data-page=scan]').click();await page.reload();await page.waitForFunction(()=>document.getElementById('auth-screen').hidden&&document.getElementById('scan-result').innerText.includes('60 dosyada hassas veri bulgusu'));assert.equal(await page.locator('#scan-result .finding-file').count(),25);await page.locator('#scan-next').click();assert.match(await page.locator('#scan-result').innerText(),/test-file-25.txt/);await page.locator('#scan-next').click();assert.equal(await page.locator('#scan-result .finding-file').count(),10);assert.equal(await page.locator('#scan-next').isDisabled(),true);
+    await page.locator('a[data-page=system]').click();assert.match(await page.locator('#installation-id').inputValue(),/^[a-f0-9-]{36}$/);assert.match(await page.locator('#license-status').innerText(),/Deneme/);await page.locator('#audit-verify').click();await page.waitForFunction(()=>document.getElementById('audit-result').textContent.includes('doğrulandı'));
+    await page.locator('#backup-password').fill('Browser-backup-password-2026');const backupDownload=page.waitForEvent('download');await page.locator('#backup-form button.primary').click();const encryptedBackup=await backupDownload;await encryptedBackup.saveAs(path.join(screens,'backup.json'));assert.equal(JSON.parse(await fs.readFile(path.join(screens,'backup.json'),'utf8')).format,'kalkan-backup');assert.equal(await page.locator('#backup-password').inputValue(),'');await page.screenshot({path:path.join(screens,'system.png'),fullPage:true});
+    await page.locator('a[data-page=users]').click();await page.locator('#new-username').fill('browserauditor');await page.locator('#new-role').selectOption('auditor');await page.locator('#new-password').fill('Auditor-password-2026');await page.locator('#user-create-form button.primary').click();await page.waitForFunction(()=>document.getElementById('user-list').innerText.includes('browserauditor'));
+    await page.locator('#logout-button').click();await page.locator('#auth-username').fill('browserauditor');await page.locator('#auth-password').fill('Auditor-password-2026');await page.locator('#auth-submit').click();await page.waitForFunction(()=>document.getElementById('auth-screen').hidden);assert.equal(await page.locator('nav a[data-page=policy]').isVisible(),false);assert.equal(await page.locator('#scan-start').isDisabled(),true);
+    await page.locator('#logout-button').click();await page.locator('#auth-username').fill('testadmin');await page.locator('#auth-password').fill('Test-password-2026');await page.locator('#auth-submit').click();await page.waitForFunction(()=>document.getElementById('auth-screen').hidden);
+    await page.setViewportSize({width:390,height:844});await page.locator('a[data-page=overview]').click();await page.screenshot({path:path.join(screens,'mobile.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));assert.deepEqual(errors,[]);
+    console.log('PASS: first-run/login, user roles, encrypted backup, audit, desktop/mobile UI, scan/report and devices');
+    const extensionKey=await page.evaluate(async()=>{const s=await(await fetch('/api/state')).json();return s.extensionKey;});
+    await browser.close();browser=null;
+    const extensionDir=path.join(root,'extension');await fs.cp(path.join(__dirname,'..','extension'),extensionDir,{recursive:true});
+    for(const name of ['manifest.json','background.js']){const file=path.join(extensionDir,name);await fs.writeFile(file,(await fs.readFile(file,'utf8')).replaceAll('127.0.0.1:4317','127.0.0.1:'+app.server.address().port));}
+    // Exercise the actual Manifest V3 background and content script in an isolated browser profile.
+    profile=await chromium.launchPersistentContext(path.join(root,'profile'),{channel:process.env.DLP_BROWSER_CHANNEL||'msedge',headless:true,args:[`--disable-extensions-except=${extensionDir}`,`--load-extension=${extensionDir}`]});
+    const worker=profile.serviceWorkers()[0]||await profile.waitForEvent('serviceworker',{timeout:15000});
+    await worker.evaluate(async key=>chrome.storage.local.set({key,domains:['127.0.0.1'],enabled:true}),extensionKey);
+    let submitted=0;formServer=http.createServer((req,res)=>{if(req.url==='/submit'){submitted++;res.end('submitted');return;}res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Form test</title><form id="test-form" action="/submit" method="post"><textarea name="body" id="body"></textarea><input id="file" type="file"><button id="submit">Submit</button></form><textarea id="outside" name="outside" form="test-form"></textarea>');});await new Promise(resolve=>formServer.listen(0,'127.0.0.1',resolve));
+    const formPage=await profile.newPage(),url=`http://127.0.0.1:${formServer.address().port}`;
+    await formPage.goto(url);await formPage.locator('#body').fill('4242424242424242');const dialogPromise=formPage.waitForEvent('dialog');await formPage.locator('#submit').click();const dialog=await dialogPromise;assert.match(dialog.message(),/engelledi/);await dialog.dismiss();assert.equal(submitted,0);
+    await formPage.locator('#body').fill('Clean meeting agenda');await formPage.locator('#submit').click();await formPage.waitForURL('**/submit');assert.equal(submitted,1);
+    await formPage.goto(url);
+    await formPage.locator('#outside').fill('Card: 4242424242424242');
+    const submittedBeforeOutside=submitted;
+    const outsideDialog=formPage.waitForEvent('dialog');
+    await formPage.locator('#submit').click({noWaitAfter:true});
+    const blockedOutside=await outsideDialog;
+    assert.match(blockedOutside.message(),/engelledi/);
+    await blockedOutside.dismiss();
+    assert.equal(submitted,submittedBeforeOutside);
+    await formPage.goto(url);const fileDialog=formPage.waitForEvent('dialog');await formPage.locator('#file').setInputFiles(path.join(input,'data.txt'));const blockedFile=await fileDialog;assert.match(blockedFile.message(),/engelledi/);await blockedFile.dismiss();await formPage.waitForFunction(()=>document.getElementById('file').files.length===0);
+    await app.close();appClosed=true;
+    await formPage.locator('#body').fill('Clean meeting agenda');const offlineDialog=formPage.waitForEvent('dialog');await formPage.locator('#submit').click();const offline=await offlineDialog;assert.match(offline.message(),/durduruldu/);await offline.dismiss();assert.equal(submitted,1);
+    console.log('PASS: actual MV3 extension blocks sensitive form/file, allows clean form, fails closed offline');
+  }finally{await browser?.close();await profile?.close();if(formServer)await new Promise(r=>formServer.close(r));if(!appClosed)await app.close();await fs.rm(root,{recursive:true,force:true});}
+})().catch(error=>{console.error(error);process.exitCode=1;});

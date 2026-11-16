@@ -1,0 +1,14 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),net=require('node:net'),{spawnSync}=require('node:child_process');
+test('central control starts a real detached server, verifies ownership and stops without deleting users',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'kalkan-central-control-')),reservation=net.createServer();await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));const port=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));const config=path.join(dir,'center.json'),data=path.join(dir,'data');await fs.writeFile(config,JSON.stringify({port,dataDir:data}));
+ const env={...process.env,DLP_CENTRAL_SERVER_CONFIG:config};for(const name of ['DLP_CENTRAL_DATA_DIR','DLP_CENTRAL_PORT','DLP_CENTRAL_ORIGIN','DLP_CENTRAL_CERT','DLP_CENTRAL_KEY','DLP_CENTRAL_REQUIRE_MFA'])delete env[name];
+ function run(action,extra={}){return spawnSync(process.execPath,[path.join(__dirname,'..','tools','central-control.cjs'),action],{env:{...env,...extra},encoding:'utf8',windowsHide:true,timeout:20000});}
+ async function stopped(){for(let i=0;i<30;i++){try{await fetch(`http://127.0.0.1:${port}/api/health`,{headers:{Connection:'close'}});}catch{return;}await new Promise(resolve=>setTimeout(resolve,100));}throw Error('Detached center did not stop.');}
+ t.after(async()=>{run('stop');await stopped();await fs.rm(dir,{recursive:true,force:true});});
+ let result=run('start');assert.equal(result.status,0,result.stderr);result=run('start');assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/zaten/);const status=run('status');assert.equal(JSON.parse(status.stdout).running,true);
+ const base=`http://127.0.0.1:${port}`,denied=await fetch(base+'/api/control/shutdown',{method:'POST',headers:{'Content-Type':'application/json',Connection:'close'},body:'{}'});assert.equal(denied.status,403);
+ const wrong=path.join(dir,'wrong.json');await fs.writeFile(wrong,JSON.stringify({port,dataDir:path.join(dir,'other-data')}));const wrongStop=run('stop',{DLP_CENTRAL_SERVER_CONFIG:wrong});assert.notEqual(wrongStop.status,0);assert.match(wrongStop.stderr,/ait değil/);assert.equal((await fetch(base+'/api/health')).status,200);
+ const setup=await fetch(base+'/api/auth/setup',{method:'POST',headers:{'Content-Type':'application/json',Connection:'close'},body:JSON.stringify({setupKey:(await fs.readFile(path.join(data,'setup-key.txt'),'utf8')).trim(),username:'controladmin',password:'Control-test-password2026'})});assert.equal(setup.status,200);
+ result=run('stop');assert.equal(result.status,0,result.stderr);await stopped();assert.equal(JSON.parse(run('status').stdout).running,false);result=run('start');assert.equal(result.status,0,result.stderr);assert.equal((await(await fetch(base+'/api/auth/status',{headers:{Connection:'close'}})).json()).configured,true);
+});

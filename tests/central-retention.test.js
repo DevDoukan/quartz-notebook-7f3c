@@ -1,0 +1,40 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
+const {openCentral}=require('../central-store'),{openStore}=require('../store'),{openCentralLink}=require('../central-client'),{createCentralApp}=require('../central-server');
+test('retention is opt-in, tenant isolated, bounded and rolls back with its audit intent',async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'kalkan-retention-'));let clock=Date.UTC(2026,9,30);const central=openCentral(dir,{now:()=>clock,auditKey:crypto.randomBytes(32)});
+ t.after(async()=>{central.close();await fs.rm(dir,{recursive:true,force:true});});
+ const a=central.createTenant('owner','A'),b=central.createTenant('other','B');central.grant('owner',a.id,'reader','auditor');
+ const agent=central.enroll(central.issueEnrollment('owner',a.id).token,'PC-A'),other=central.enroll(central.issueEnrollment('other',b.id).token,'PC-B');
+ assert.equal(central.storage('reader',a.id).retentionDays,0);assert.throws(()=>central.storage('other',a.id),/yetkiniz/);assert.throws(()=>central.setStorage('reader',a.id,{retentionDays:1,maxEvents:2000,acknowledgeDeletion:true}),/yetkiniz/);
+ assert.throws(()=>central.setStorage('owner',a.id,{retentionDays:1,maxEvents:2000}),/onaylanmalı/);
+ for(const input of [{retentionDays:-1,maxEvents:100},{retentionDays:1.5,maxEvents:100},{retentionDays:0,maxEvents:100001}])assert.throws(()=>central.setStorage('owner',a.id,input),/Geçersiz/);
+ central.setStorage('owner',a.id,{retentionDays:0,maxEvents:2000});
+ for(let i=0;i<1005;i++)central.ingest(agent.credential,{id:'event-'+i,kind:'usb',decision:'block',count:1});
+ central.ingest(other.credential,{id:'other-event',kind:'web',decision:'allow',count:0});clock+=2*86400000;
+ assert.deepEqual(central.retentionTenants(),[]);assert.equal(central.pruneEvents(a.id).deleted,0);
+ central.setStorage('owner',a.id,{retentionDays:1,maxEvents:2000,acknowledgeDeletion:true});
+ const event={id:crypto.randomUUID(),summary:'retention test'};
+ assert.throws(()=>central.audited(event,()=>{central.pruneEvents(a.id);throw Error('forced audit rollback');}),/forced/);assert.equal(central.storage('owner',a.id).events,1005);
+ const result=central.audited(event,()=>central.pruneEvents(a.id));assert.equal(result.deleted,1000);assert.equal(central.storage('owner',a.id).events,5);assert.equal(central.storage('other',b.id).events,1);
+ const recorded=[];central.flushAudit(value=>recorded.push(value));assert.equal(recorded.length,1);assert.equal(central.pruneEvents(a.id).deleted,5);
+ central.ingest(agent.credential,{id:'at-cutoff',kind:'usb',decision:'allow',count:0});clock+=86400000;assert.equal(central.pruneEvents(a.id).deleted,0);clock++;assert.equal(central.pruneEvents(a.id).deleted,1);
+});
+test('central capacity backpressure preserves a real agent queue and audited maintenance releases it',async t=>{
+ t.mock.timers.enable({apis:['setInterval']});
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'kalkan-retention-http-'));let clock=Date.UTC(2026,9,30);const app=createCentralApp({dataDir:path.join(dir,'center'),now:()=>clock}),endpoint=openStore(path.join(dir,'endpoint'));let link;
+ t.after(async()=>{await link?.close();endpoint.close();await app.close();await fs.rm(dir,{recursive:true,force:true});});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;
+ let cookie='',csrf='';async function call(route,input,bearer){const response=await fetch(base+route,{method:input===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(bearer?{Authorization:'Bearer '+bearer}:{Cookie:cookie,'X-DLP-Token':csrf})},body:input===undefined?undefined:JSON.stringify(input)}),data=await response.json();if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];if(data.token&&!bearer&&route.startsWith('/api/auth/'))csrf=data.token;return {status:response.status,data};}
+ const password='Retention-test-password-2026';assert.equal((await call('/api/auth/setup',{setupKey:await fs.readFile(path.join(dir,'center','setup-key.txt'),'utf8'),username:'admin',password})).status,200);
+ const tenant=(await call('/api/tenants',{name:'Company'})).data.id,route='/api/tenants/'+tenant+'/';
+ assert.equal((await call(route+'storage',{retentionDays:0,maxEvents:100})).status,200);
+ const token=(await call(route+'enrollment',{})).data.token,agent=(await call('/api/agent/enroll',{name:'PC',token})).data;
+ for(let i=0;i<100;i++)assert.equal((await call('/api/agent/events',{id:'event-'+i,kind:'usb',decision:'block',count:1},agent.credential)).status,200);
+ const replay=await call('/api/agent/events',{id:'event-0',kind:'usb',decision:'block',count:1},agent.credential);assert.equal(replay.status,200);assert.equal(replay.data.accepted,false);
+ assert.equal((await call('/api/agent/events',{id:'event-0',kind:'usb',decision:'allow',count:1},agent.credential)).status,400);
+ link=openCentralLink(endpoint,{...agent,origin:base},{testLoopback:true});link.enqueue({id:'queued-event',kind:'web',decision:'block',count:2});await assert.rejects(link.sync(),error=>error.status===507);assert.equal(link.status().queued,1);
+ clock+=2*86400000;await call('/api/auth/login',{username:'admin',password});assert.equal((await call(route+'storage',{retentionDays:1,maxEvents:100})).status,400);
+ assert.equal((await call(route+'storage',{retentionDays:1,maxEvents:100,acknowledgeDeletion:true})).status,200);t.mock.timers.tick(60000);
+ assert.equal((await call(route+'storage')).data.events,0);const audit=(await call(route+'audit')).data.events;assert.ok(audit.some(event=>event.actor==='event-retention'&&event.details.deleted===100));
+ await link.sync();assert.equal(link.status().queued,0);assert.equal((await call(route+'storage')).data.events,1);
+});

@@ -1,0 +1,3 @@
+'use strict';
+const fs=require('node:fs'),{restoreBackup}=require('../backup');
+(async()=>{const [backup,target]=process.argv.slice(2);if(!backup||!target)throw Error('Kullanım: parola-stdin | node tools/restore-backup.cjs yedek.json yeni-boş-klasör');let password='';for await(const chunk of process.stdin){password+=chunk;if(password.length>256)throw Error('Parola girdisi çok büyük.');}const result=await restoreBackup(JSON.parse(fs.readFileSync(backup,'utf8')),password.replace(/\r?\n$/,''),target);console.log(JSON.stringify(result));})().catch(error=>{console.error(error.message);process.exit(1);});

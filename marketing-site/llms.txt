@@ -1,0 +1,23 @@
+# Kalkan DLP
+
+> Kalkan DLP is a Windows data-loss-prevention product for company IT teams and managed-service resellers in Türkiye.
+
+## Product scope
+
+- A company central server manages tenant access, Windows agent enrollment, signed policies, device status and event summaries.
+- Company servers renew their vendor license from the Kalkan license service. Windows clients communicate with their own company server and do not contact the vendor license host.
+- Local scanning, policy-controlled application workflows, supported browser form checks and configured SMTP delivery are available within their documented scope.
+- USB file-content inspection is provided for copies made through the application. Windows USB storage write protection can set supported storage devices read-only.
+- The product does not currently claim Windows minifilter enforcement, content-aware blocking of all Explorer copies, all-application network inspection or every email client.
+- DLP documents and client event content remain with the company server; the vendor licensing service processes server identity and license data only.
+
+## Pages
+
+- https://kalkandlp.com.tr/ — Turkish product overview and FAQ.
+- https://kalkandlp.com.tr/gizlilik.html — measurement consent information.
+- https://panel.kalkandlp.com.tr/ — intended license operations panel; access is for authorized product administrators.
+
+## Publisher contact
+
+- MTB Güvenlik Ve Bilişim Sistemleri
+- destek@dkavis.com.tr

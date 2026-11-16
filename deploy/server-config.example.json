@@ -1,0 +1,8 @@
+{
+  "origin": "https://dlp.firma.example:9443",
+  "port": 9443,
+  "tlsCertFile": "/etc/kalkan-dlp/fullchain.pem",
+  "tlsKeyFile": "/etc/kalkan-dlp/private-key.pem",
+  "dataDir": "/var/lib/kalkan-dlp",
+  "requireMfa": true
+}

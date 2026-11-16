@@ -1,0 +1,22 @@
+'use strict';
+const {test}=require('node:test'),a=require('node:assert/strict'),crypto=require('node:crypto'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {openStore}=require('../store'),{openCentralLink}=require('../central-client');
+test('driver policy uses real signed central authorization, expires offline and closes without local fallback',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kalkan-driver-policy-')),store=openStore(dir);
+ const vendor=crypto.generateKeyPairSync('ed25519'),server=crypto.generateKeyPairSync('ed25519'),serverId=crypto.randomUUID(),deviceId=crypto.randomUUID();let now=Date.now(),link;
+ const pem=vendor.publicKey.export({type:'spki',format:'pem'}),expiresAt=new Date(now+60000).toISOString();
+ const leaseClaims={schema:1,product:'kalkan-dlp-server',serverId,customer:'Test',licenseId:'test-license',revision:1,deviceLimit:2,state:'active',issuedAt:new Date(now-1000).toISOString(),expiresAt};
+ const raw=Buffer.from(JSON.stringify(leaseClaims)),vendorLease={payload:raw.toString('base64url'),signature:crypto.sign(null,raw,vendor.privateKey).toString('base64url')};
+ const sign=value=>{const payload=JSON.stringify(value);return {payload,signature:crypto.sign(null,Buffer.from(payload),server.privateKey).toString('base64')};};
+ const signed=sign({deviceId,serverId,vendorLicensePublicKey:pem,policy:{revision:7,mode:'block',enabled:['card']}});
+ const entitlement=sign({schema:1,product:'kalkan-dlp-client-entitlement',serverId,deviceId,sequence:1,issuedAt:new Date(now).toISOString(),expiresAt,vendorLease});
+ const endpoint=http.createServer(async(req,res)=>{for await(const part of req){}res.setHeader('Content-Type','application/json');res.end(JSON.stringify({signed,entitlement}));});
+ t.after(async()=>{await link?.close();store.close();await new Promise(resolve=>endpoint.close(resolve));fs.rmSync(dir,{recursive:true,force:true});});
+ await new Promise(resolve=>endpoint.listen(0,'127.0.0.1',resolve));
+ link=openCentralLink(store,{origin:`http://127.0.0.1:${endpoint.address().port}`,id:deviceId,credential:crypto.randomBytes(32).toString('hex'),policyPublicKey:server.publicKey.export({type:'spki',format:'pem'})},{testLoopback:true,testVendorPublicKey:vendor.publicKey,now:()=>now});
+ a.equal(link.scanPolicy(),null);await link.sync();
+ a.deepEqual(link.scanPolicy(),{revision:7,mode:'block',enabled:['card']});
+ const copy=link.scanPolicy();copy.enabled.push('iban');a.deepEqual(link.scanPolicy().enabled,['card']);
+ now+=60001;a.equal(link.scanPolicy(),null);a.equal(link.policy().mode,'block','Cached policy may remain visible but must not authorize a driver request');
+ await link.close();a.equal(link.scanPolicy(),null);
+});

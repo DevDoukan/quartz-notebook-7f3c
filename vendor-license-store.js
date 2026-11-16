@@ -1,0 +1,23 @@
+'use strict';
+const {DatabaseSync}=require('node:sqlite'),crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
+const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
+function openVendorLicenses(dir,{privateKey,now=Date.now}={}){
+ const key=crypto.createPrivateKey(privateKey);if(key.asymmetricKeyType!=='ed25519')throw Error('Üretici Ed25519 anahtarı gerekir.');
+ fs.mkdirSync(dir,{recursive:true});const db=new DatabaseSync(path.join(dir,'vendor-licenses.sqlite'));db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,token_hash TEXT NOT NULL UNIQUE,server_id TEXT NOT NULL UNIQUE,customer TEXT NOT NULL,device_limit INTEGER NOT NULL,expires INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,document TEXT);`);
+ function provision({serverId,customer,deviceLimit,expiresAt}){if(typeof serverId!=='string'||!/^[a-f0-9-]{36}$/.test(serverId)||typeof customer!=='string'||!customer.trim()||customer.length>200||!Number.isSafeInteger(deviceLimit)||deviceLimit<1||deviceLimit>100000||!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=now())throw Error('Geçersiz üretici lisans kaydı.');const credential=crypto.randomBytes(32).toString('hex'),id=crypto.randomUUID();db.prepare('INSERT INTO grants(id,token_hash,server_id,customer,device_limit,expires) VALUES(?,?,?,?,?,?)').run(id,hash(credential),serverId,customer.trim(),deviceLimit,Date.parse(expiresAt));return {licenseId:id,credential};}
+ function revoke(id){if(!db.prepare('UPDATE grants SET revoked=1,document=NULL WHERE id=?').run(id).changes)throw Error('Üretici lisansı bulunamadı.');}
+ function renew(id,{deviceLimit,expiresAt}){if(!Number.isSafeInteger(deviceLimit)||deviceLimit<1||deviceLimit>100000||!Number.isFinite(Date.parse(expiresAt))||Date.parse(expiresAt)<=now())throw Error('Geçersiz lisans yenileme bilgisi.');if(!db.prepare('UPDATE grants SET device_limit=?,expires=?,document=NULL WHERE id=? AND revoked=0').run(deviceLimit,Date.parse(expiresAt),id).changes)throw Error('Etkin üretici lisansı bulunamadı. İptal edilmiş lisans yeniden açılamaz.');}
+ db.exec('CREATE TABLE IF NOT EXISTS activation_failures(id INTEGER PRIMARY KEY CHECK(id=1),count INTEGER NOT NULL,until INTEGER NOT NULL)');
+ function rejectActivation(){const at=now(),limit=db.prepare('SELECT count,until FROM activation_failures WHERE id=1').get();if(limit&&limit.until>at&&limit.count>=20){const error=Error('Aktivasyon denemesi sınırı aşıldı.');error.status=429;throw error;}db.prepare('INSERT INTO activation_failures VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET count=excluded.count,until=excluded.until').run(limit&&limit.until>at?limit.count+1:1,limit&&limit.until>at?limit.until:at+900000);const error=Error('Aktivasyon doğrulanamadı.');error.status=401;throw error;}
+ function lease(credential,input){if(typeof credential!=='string'||!/^[a-f0-9]{64}$/.test(credential)||!input||input.schema!==1||input.product!=='kalkan-dlp-server'||!Number.isSafeInteger(input.revision)||input.revision<0) return rejectActivation();
+ const known=db.prepare('SELECT server_id,revision FROM grants WHERE token_hash=?').get(hash(credential));if(!known||known.server_id!==input.serverId||input.revision>known.revision)return rejectActivation();
+ db.exec('BEGIN IMMEDIATE');try{
+  const row=db.prepare('SELECT * FROM grants WHERE token_hash=?').get(hash(credential));if(!row||row.server_id!==input.serverId||input.revision>row.revision)throw Error('Aktivasyon doğrulanamadı.');const at=now();
+  if(row.document){const saved=JSON.parse(row.document),claims=JSON.parse(Buffer.from(saved.payload,'base64url').toString('utf8'));if(Date.parse(claims.issuedAt)>at+60000)throw Error('Üretici saati geri alınmış.');if(Date.parse(claims.expiresAt)>at+3600000){db.exec('COMMIT');return saved;}}
+  const active=!row.revoked&&row.expires>at,expires=active?Math.min(row.expires,at+86400000):at+86400000;
+  const claims={schema:1,product:'kalkan-dlp-server',serverId:row.server_id,licenseId:row.id,customer:row.customer,revision:row.revision+1,deviceLimit:row.device_limit,state:active?'active':'revoked',issuedAt:new Date(at).toISOString(),expiresAt:new Date(expires).toISOString()},raw=Buffer.from(JSON.stringify(claims)),document={payload:raw.toString('base64url'),signature:crypto.sign(null,raw,key).toString('base64url')};
+  db.prepare('UPDATE grants SET revision=?,document=? WHERE id=?').run(claims.revision,JSON.stringify(document),row.id);db.exec('COMMIT');return document;
+ }catch(error){db.exec('ROLLBACK');throw error;}}
+ return {provision,revoke,renew,lease,close(){db.close();}};
+}
+module.exports={openVendorLicenses};

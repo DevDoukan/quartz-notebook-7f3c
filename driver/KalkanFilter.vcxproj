@@ -1,0 +1,10 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+ <PropertyGroup Label="Globals"><ProjectGuid>{1DC35320-C78B-4AE9-B328-2DE1E45CA8D3}</ProjectGuid><RootNamespace>KalkanFilter</RootNamespace><WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+ <PropertyGroup Label="Configuration"><ConfigurationType>Driver</ConfigurationType><DriverType>WDM</DriverType><DriverTargetPlatform>Universal</DriverTargetPlatform><PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset><TargetVersion>Windows10</TargetVersion><UseDebugLibraries>false</UseDebugLibraries></PropertyGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+ <ItemDefinitionGroup><ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError></ClCompile><Link><AdditionalDependencies>FltMgr.lib;%(AdditionalDependencies)</AdditionalDependencies></Link><DriverSign><FileDigestAlgorithm>sha256</FileDigestAlgorithm></DriverSign></ItemDefinitionGroup>
+ <ItemGroup><ClCompile Include="KalkanFilter.c" /></ItemGroup>
+ <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

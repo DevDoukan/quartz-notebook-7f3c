@@ -1,0 +1,8 @@
+{
+  "productName": "Kalkan DLP",
+  "publisher": "MTB Güvenlik Ve Bilişim Sistemleri - Enez ERCAN",
+  "supportEmail": "destek@dkavis.com.tr",
+  "audiences": ["corporate-it", "managed-service-provider"],
+  "certificateStatus": "enrollment-required",
+  "signing": { "validatedSubject": null }
+}

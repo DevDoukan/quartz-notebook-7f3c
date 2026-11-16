@@ -1,0 +1,11 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),path=require('node:path'),{spawnSync}=require('node:child_process');
+test('machine enrollment refuses a non-elevated caller before prompting or modifying service',{skip:process.platform!=='win32'},t=>{
+ const env={...process.env};delete env.PSModulePath;
+ const identity=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"],{env,encoding:'utf8',windowsHide:true});assert.equal(identity.status,0);if(identity.stdout.trim()==='True'){t.skip('This negative test requires a standard, non-elevated token.');return;}
+ const run=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(__dirname,'..','scripts','Register-Agent.ps1'),'-ValidateOnly'],{env,encoding:'utf8',windowsHide:true,timeout:10000});assert.notEqual(run.status,0);assert.match(run.stderr,/elevated Windows administrator/);assert.equal((run.stdout+run.stderr).includes('hidden input'),false);
+});
+test('service USB helper reaches identity validation without changing registry under an ordinary token',{skip:process.platform!=='win32'},async t=>{
+ const env={...process.env};delete env.PSModulePath;const role=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"try{$i=[Security.Principal.WindowsIdentity]::GetCurrent();$p=[Security.Principal.WindowsPrincipal]::new($i);$s=([Security.Principal.NTAccount]'NT SERVICE\\KalkanDlpAgent').Translate([Security.Principal.SecurityIdentifier]);$p.IsInRole($s)}catch{$false}"],{env,encoding:'utf8',windowsHide:true});assert.equal(role.status,0);if(role.stdout.trim()==='True'){t.skip('Never invoke the registry writer under a real service token in this negative test.');return;}
+ await assert.rejects(require('../windows').setWriteProtection(true,{serviceMode:true}),error=>{assert.doesNotMatch(error.stderr||'',/PSSecurityException|running scripts is disabled|UnauthorizedAccess.*ps1/i);assert.match(error.stderr||'',/hizmet kimli|IdentityNotMappedException|translate|çevril/i);return true;});
+});

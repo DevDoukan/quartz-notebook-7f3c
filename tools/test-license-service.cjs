@@ -1,0 +1,28 @@
+'use strict';
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),http=require('node:http'),{spawn}=require('node:child_process'),crypto=require('node:crypto');
+const root=path.join(__dirname,'..'),php=process.env.KALKAN_PHP_EXE||'C:\\xampp\\php\\php.exe',tmp=fs.mkdtempSync(path.join(os.tmpdir(),'kalkan-license-php-')),seed=Buffer.from(fs.readFileSync(path.join(root,'.vendor','vendor-signing.seed'),'utf8').trim(),'base64url'),privateKey=crypto.createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),seed]),format:'der',type:'pkcs8'}),publicKey=crypto.createPublicKey(privateKey),pub=publicKey.export({format:'der',type:'spki'}).subarray(-32),portServer=netServer();
+function netServer(){return require('node:net').createServer()}
+function b64url(b){return Buffer.from(b).toString('base64url')}
+function check(ok,message){if(!ok)throw Error(message)}
+function phpRequest(port,route,body,authorization){return new Promise((resolve,reject)=>{const raw=Buffer.from(JSON.stringify(body)),req=http.request({host:'127.0.0.1',port,path:route,method:'POST',headers:{Host:'lisans.kalkandlp.com.tr','Content-Type':'application/json','Content-Length':raw.length,...authorization?{Authorization:authorization}:{}}},res=>{let data='';res.setEncoding('utf8');res.on('data',chunk=>data+=chunk);res.on('end',()=>{try{resolve({status:res.statusCode,data:JSON.parse(data)})}catch(error){reject(error)}})});req.on('error',reject);req.end(raw)})}
+async function main(){
+ const seedFile=path.join(tmp,'seed');fs.writeFileSync(seedFile,Buffer.from(seed).toString('base64'));const dbFile=path.join(tmp,'licenses.sqlite'),config=path.join(tmp,'config.php'),shim=path.join(tmp,'https.php');
+ fs.writeFileSync(config,`<?php return ['database'=>${JSON.stringify(dbFile)},'signing_seed'=>${JSON.stringify(seedFile)},'vendor_public_key'=>${JSON.stringify(b64url(pub))}];`);
+ fs.writeFileSync(shim,"<?php $_SERVER['HTTPS']='on';\n");
+ await new Promise(resolve=>portServer.listen(0,'127.0.0.1',resolve));const port=portServer.address().port;await new Promise(resolve=>portServer.close(resolve));
+ const child=spawn(php,['-d','extension=sodium','-d','auto_prepend_file='+shim,'-S',`127.0.0.1:${port}`,'-t',path.join(root,'licensing-php','public')],{env:{...process.env,KALKAN_LICENSE_CONFIG:config},windowsHide:true,stdio:'ignore'});
+ try{
+  let ready=false;for(let i=0;i<60;i++){if(child.exitCode!==null)throw Error(`PHP server stopped (${child.exitCode})`);try{await new Promise((resolve,reject)=>{const req=http.get({host:'127.0.0.1',port,path:'/',headers:{Host:'lisans.kalkandlp.com.tr'}},res=>{res.resume();res.on('end',resolve)});req.on('error',reject)});ready=true;break}catch{await new Promise(r=>setTimeout(r,150))}}check(ready,'PHP test server did not start');
+  const serverId=crypto.randomUUID(),now=Date.now(),command={id:crypto.randomUUID(),action:'provision',serverId,customer:'PHP integration test',deviceLimit:4,licenseExpiresAt:new Date(now+86400000).toISOString(),issuedAt:new Date(now-1000).toISOString(),expiresAt:new Date(now+120000).toISOString()},raw=Buffer.from(JSON.stringify(command)),admin={payload:b64url(raw),signature:b64url(crypto.sign(null,raw,privateKey))};
+  const provision=await phpRequest(port,'/api/v1/admin/command',admin);check(provision.status===200&&provision.data.credential&&provision.data.licenseId,'signed provision command failed');
+  const privateFiles=fs.readdirSync(tmp).filter(name=>name.endsWith('.sqlite')||name.endsWith('.sqlite-wal')).map(name=>fs.readFileSync(path.join(tmp,name)));check(privateFiles.every(data=>!data.includes(Buffer.from(provision.data.credential))),'activation credential was stored in cleartext');
+  const replay=await phpRequest(port,'/api/v1/admin/command',admin);check(replay.status===200&&replay.data.credential===provision.data.credential,'admin command replay was not idempotent');
+  const leaseBody={schema:1,product:'kalkan-dlp-server',serverId,revision:0},lease=await phpRequest(port,'/api/v1/server/lease',leaseBody,'Bearer '+provision.data.credential);check(lease.status===200,'lease request failed');
+  const claims=JSON.parse(Buffer.from(lease.data.payload,'base64url').toString('utf8'));check(crypto.verify(null,Buffer.from(lease.data.payload,'base64url'),publicKey,Buffer.from(lease.data.signature,'base64url')),'lease signature invalid');check(claims.state==='active'&&claims.serverId===serverId&&claims.deviceLimit===4,'lease claims invalid');
+  const bad=await phpRequest(port,'/api/v1/server/lease',{...leaseBody,serverId:crypto.randomUUID()},'Bearer '+provision.data.credential);check(bad.status===401,'credential/server binding was not enforced');
+  const revoke={...command,id:crypto.randomUUID(),action:'revoke',licenseId:provision.data.licenseId};delete revoke.serverId;delete revoke.customer;delete revoke.deviceLimit;delete revoke.licenseExpiresAt;const revokeRaw=Buffer.from(JSON.stringify(revoke)),revoked=await phpRequest(port,'/api/v1/admin/command',{payload:b64url(revokeRaw),signature:b64url(crypto.sign(null,revokeRaw,privateKey))});check(revoked.status===200,'signed revoke command failed');
+  const after=await phpRequest(port,'/api/v1/server/lease',leaseBody,'Bearer '+provision.data.credential),revokedClaims=JSON.parse(Buffer.from(after.data.payload,'base64url').toString('utf8'));check(after.status===200&&revokedClaims.state==='revoked','revocation did not reach next lease');
+  console.log('PASS PHP license service: signed provision, encrypted replay cache, signed lease, identity binding, revocation');
+ }finally{child.kill();fs.rmSync(tmp,{recursive:true,force:true})}
+}
+main().catch(error=>{console.error(error);process.exitCode=1});

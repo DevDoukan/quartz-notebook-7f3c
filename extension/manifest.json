@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Kalkan DLP Form Koruması",
+  "version": "1.0.0",
+  "description": "Seçtiğiniz sitelerde standart form ve dosya seçimlerini yerel Kalkan DLP kurallarıyla denetler.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:4317/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["guard.js"], "run_at": "document_start", "all_frames": true}]
+}
