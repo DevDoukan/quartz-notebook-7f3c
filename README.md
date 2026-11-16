@@ -2,7 +2,7 @@
 
 [Güncel Windows Client ve Server kurucularını indir](latest/)
 
-Yeni bir sürüm yayımlarken kurulum dosyalarını ve doğrulanmış yayın raporunu hazırlayın. Windows PowerShell 7 ile `pwsh -File tools/Publish-Latest.ps1` komutunu çalıştırın. Ardından `latest/README.md` değişikliğini sürümle birlikte GitHub'a gönderin.
+Yeni bir sürüm yayımlarken kurulum dosyalarını ve doğrulanmış yayın raporunu hazırlayın. PowerShell 7 ile `pwsh -File tools/Publish-Latest.ps1` komutunu çalıştırın. Ardından `latest/README.md` değişikliğini sürümle birlikte GitHub'a gönderin.
 
 ## 1.2 sürüm adayı ve ürünleşme durumu
 

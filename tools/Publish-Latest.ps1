@@ -53,7 +53,8 @@ foreach ($role in 'client', 'server') {
     if ($asset.size -ne $file.Length -or $asset.digest -ine ('sha256:' + $installer.sha256)) {
         throw "GitHub dosyası yayın raporuyla eşleşmiyor ($role)."
     }
-    $links[$role] = $asset.browser_download_url
+    # Draft assets can report a temporary untagged download URL.
+    $links[$role] = "https://github.com/$repository/releases/download/$tag/" + [uri]::EscapeDataString($file.Name)
 }
 if ($release.draft) {
     Invoke-RestMethod "$api/releases/$($release.id)" -Method Patch -Headers $headers -ContentType 'application/json' -Body (
