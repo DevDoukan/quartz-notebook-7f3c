@@ -2,11 +2,21 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $repository = 'DevDoukan/quartz-notebook-7f3c'
 $report = Get-Content -LiteralPath (Join-Path $root 'release/RELEASE-STATUS.json') -Raw | ConvertFrom-Json
-if (!$report.reportComplete -or !$report.releaseTestsPassed -or $report.version -notmatch '^\d+\.\d+\.\d+(?:-rc\.\d+)?$') {
+if (!$report.reportComplete -or !$report.releaseTestsPassed -or !$report.testsRunOnCurrentSource -or
+    $report.recordedTestVersion -ne $report.version -or $report.version -notmatch '^\d+\.\d+\.\d+(?:-rc\.\d+)?$') {
     throw 'Doğrulanmış yayın raporu gerekli.'
 }
 
+$source = & node (Join-Path $root 'tools/source-fingerprint.cjs') $root
+if ($LASTEXITCODE -ne 0 -or ($source | ConvertFrom-Json).sha256 -ne $report.sourceFingerprint) {
+    throw 'Kaynak değişti. Yayın paketlerini ve test raporunu yeniden oluşturun.'
+}
+
 $installers = @{}
+if ($report.openGates.name -contains 'package-integrity' -or
+    $report.openGates.name -contains 'server-installer-integrity') {
+    throw 'Client ve Server kurulum paketlerinin kaynak bütünlüğü doğrulanmalı.'
+}
 foreach ($role in 'client', 'server') {
     $package = @($report.packages | Where-Object { $_.role -eq $role -and $_.version -eq $report.version })
     if ($package.Count -ne 1) { throw "Kurulum paketi eksik veya yinelenmiş ($role)." }
