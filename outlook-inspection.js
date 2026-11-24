@@ -38,11 +38,15 @@ async function inspectOutlookMessage(message, policy, internalDomains) {
   let totalBytes = 0;
   for (const attachment of attachments) {
     const { name, content } = attachment || {};
-    if (typeof name !== 'string' || !name || name.length > 255 || !Buffer.isBuffer(content)) {
+    if (typeof name !== 'string' || !name || name.length > 255) {
       unreadableAttachments++;
       continue;
     }
     scan(name);
+    if (!Buffer.isBuffer(content)) {
+      unreadableAttachments++;
+      continue;
+    }
     totalBytes += content.length;
     if (totalBytes > MAX_ATTACHMENT_BYTES) {
       unreadableAttachments++;

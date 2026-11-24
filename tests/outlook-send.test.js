@@ -4,16 +4,27 @@ const assert = require('node:assert/strict');
 const { handleOutlookSend, createOutlookEvaluator, registerOutlookSend, outlookItemSessionLoader, setOutlookItemSession, renewableOutlookSessionLoader } = require('../outlook-send');
 const { inspectOutlookSubmission } = require('../outlook-inspection');
 
-function item() {
+function item(attachments = []) {
   const field = value => ({ getAsync: callback => callback({ status: 'succeeded', value }) });
   return {
     from: field({ emailAddress: 'sender@corp.example' }),
     to: field([{ emailAddress: 'recipient@corp.example' }]),
     cc: field([]), bcc: field([]), subject: field('Merhaba'),
     body: { getAsync: (type, callback) => callback({ status: 'succeeded', value: 'İleti' }) },
-    getAttachmentsAsync: callback => callback({ status: 'succeeded', value: [] })
+    getAttachmentsAsync: callback => callback({ status: 'succeeded', value: attachments })
   };
 }
+
+test('Outlook explains a block caused by an oversized attachment', async () => {
+  const message = item([{ name: 'report.pdf', size: 11 * 1024 * 1024 }]);
+  const decisions = [];
+  await handleOutlookSend({ completed: value => decisions.push(value) }, message,
+    submission => inspectOutlookSubmission(submission, { mode: 'block', enabled: [] }, ['corp.example']));
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].allowEvent, false);
+  assert.match(decisions[0].errorMessage, /eki tarayamadı/);
+  assert.equal(decisions[0].sendModeOverride, undefined);
+});
 
 test('Outlook item session accepts only a short scoped identity for the expected company', async () => {
   let saved;

@@ -27,11 +27,11 @@ test('Outlook inspection counts external Bcc and returns a content-free decision
 
 test('Outlook inspection treats unavailable or unsupported attachments as unreadable', async () => {
   const input = { ...message, attachments: [
-    { name: 'cloud.docx' }, { name: 'unsupported.dat', content: Buffer.from('hello') }
+    { name: 'confidential cloud.docx' }, { name: 'unsupported.dat', content: Buffer.from('hello') }
   ] };
   for (const [mode, decision] of [['block', 'block'], ['audit', 'warn']]) {
     assert.deepEqual(await inspectOutlookMessage(input, { ...policy, mode }, ['corp.example']), {
-      decision, rules: [], unreadableAttachments: 2, externalRecipients: 1
+      decision, rules: ['confidential'], unreadableAttachments: 2, externalRecipients: 1
     });
   }
   await assert.rejects(inspectOutlookMessage({ ...message, bcc: ['unresolved'] }, policy, []), /çözümlenemedi/);

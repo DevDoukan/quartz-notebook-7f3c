@@ -182,7 +182,9 @@ async function handleOutlookSend(event, item, evaluate, timeoutMs = 15000,
     });
     else event.completed({
       allowEvent: false,
-      errorMessage: 'Kalkan DLP politikası gönderime izin vermedi. Şirket BT ekibinizle görüşün.'
+      errorMessage: result?.unreadableAttachments > 0
+        ? 'Kalkan DLP bir veya daha fazla eki tarayamadı. Ekleri kontrol edip yeniden deneyin.'
+        : 'Kalkan DLP politikası gönderime izin vermedi. Şirket BT ekibinizle görüşün.'
     });
   } catch {
     event.completed({
