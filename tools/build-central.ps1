@@ -42,7 +42,21 @@ if($LinuxSaas){
  $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'RELEASE-MANIFEST.json') -Encoding utf8
  & $NodeExe (Join-Path $stage 'tools\verify-package.cjs') $stage
  if($LASTEXITCODE -ne 0){throw 'Linux SaaS package integrity verification failed.'}
- Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $output -CompressionLevel Optimal
+ Add-Type -AssemblyName System.IO.Compression
+ Add-Type -AssemblyName System.IO.Compression.FileSystem
+ $temp=$output+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+ try {
+  $archive=[IO.Compression.ZipFile]::Open($temp,[IO.Compression.ZipArchiveMode]::Create)
+  try {
+   foreach($file in Get-ChildItem -LiteralPath $stage -File -Recurse){
+    $entry=$file.FullName.Substring($stage.Length+1).Replace('\','/')
+    [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$file.FullName,$entry,[IO.Compression.CompressionLevel]::Optimal) | Out-Null
+   }
+  } finally {$archive.Dispose()}
+  [IO.File]::Move($temp,$output)
+ } finally {
+  if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Force}
+ }
  Write-Host $output
  return
 }
