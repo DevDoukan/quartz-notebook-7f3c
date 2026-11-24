@@ -35,7 +35,7 @@ Microsoft belgeleri
 
 Denetim API’si müşterinin HTTPS merkezinde POST /api/agent/outlook/inspect yolundadır. Kayıtlı cihaz kimliği gerekir. Genel ajan kimliğinin Office manifestine, herkese açık JavaScript dosyasına veya URL’ye yazılması uygun değildir. Üretim eklentisi için kullanıcı ve cihaz eşleştirmesi ile yetkisi sınırlandırılmış kimlik akışı tamamlanmalıdır.
 
-Kayıtlı Client, kendi genel kimliğiyle HTTPS üzerinden POST /api/agent/outlook/credential çağırarak 15 dakika geçerli bir Outlook kimliği alabilir. Kimlik o1_ öneki taşır ve yalnızca Outlook denetiminde kullanılabilir. Yeni kimlik üretimi önceki kimliği geçersiz kılar. Eklenti bağlantı kodu yalnızca bu sınırlı kimliği kabul eder. API kapsam ve süre kontrolleri test edildi. Client panelinden dosya indirme ve Outlook görev bölmesinden içe aktarma uygulanmıştır. Otomatik aktarım ve yenileme bekliyor.
+Kayıtlı Client, kendi genel kimliğiyle HTTPS üzerinden POST /api/agent/outlook/credential çağırarak 15 dakika geçerli bir Outlook kimliği alabilir. Kimlik o1_ öneki taşır ve yalnızca Outlook denetiminde kullanılabilir. Yeni kimlik üretimi önceki kimliği geçersiz kılar. Eklenti bağlantı kodu yalnızca bu sınırlı kimliği kabul eder. API kapsam ve süre kontrolleri test edildi. Client panelinden dosya indirme ve Outlook görev bölmesinden içe aktarma uygulanmıştır. İlk bağlantı dosyayla yapılır. Gönderim sırasında geçerli oturumun kalan süresi iki dakika veya daha azsa eklenti otomatik yenileme dener.
 
 ## Test bağlantısını kurma
 
@@ -45,7 +45,7 @@ Kayıtlı Client, kendi genel kimliğiyle HTTPS üzerinden POST /api/agent/outlo
 4. Temiz ve hassas test iletilerini ayrı deneyin. İzin sonucu, engel sonucu ve alıcı posta kutusunu gerçek kabul listesine göre kontrol edin.
 5. Oturum süresi dolunca yeni bağlantı dosyasını indirin ve iletiye yeniden aktarın. Yeni dosya, aynı cihaz için önceden verilen Outlook kimliğini geçersiz kılar. Birden fazla açık ileti eski kimliği kullanıyorsa yeniden bağlanmalıdır.
 
-Dosya bir erişim anahtarı içerir. Paylaşmayın ve testten sonra indirme klasöründeki kopyasını silin. Anahtarın içeriği panelde veya görev bölmesinde gösterilmez. Oturum iletiye özel SessionData içinde tutulur. Otomatik aktarım ve otomatik yenileme henüz uygulanmadı. Dosya içe aktarma kaynak ve tarayıcı testlerinde doğrulandı, gerçek Outlook kabulü açık.
+Dosya bir erişim anahtarı içerir. Paylaşmayın ve testten sonra indirme klasöründeki kopyasını silin. Anahtarın içeriği panelde veya görev bölmesinde gösterilmez. Oturum iletiye özel SessionData içinde tutulur. Yenileme ilk yetkilendirmeden itibaren sekiz saatle sınırlıdır. Süresi dolmuş oturum için yeni dosya gerekir. Dosya içe aktarma kaynak ve tarayıcı testlerinde doğrulandı, gerçek Outlook kabulü açık.
 
 Toplam ek içeriği 10 MiB, ek sayısı 20 ve API isteği 16 MiB ile sınırlıdır. Okunamayan ekler ayrı sonuç verir. Politika block ise okunamayan ek gönderimi engeller. Alan adı listesi kesin alan adı eşleşmesi kullanır. Alt alan adları ayrıca eklenmelidir.
 
