@@ -174,17 +174,22 @@ async function handleOutlookSend(event, item, evaluate, timeoutMs = 15000,
       return result;
     };
     const result = await Promise.race([inspection(), timeout]);
+    const hasExternalRecipient = Array.isArray(result?.rules) && result.rules.includes('outlook_external_recipient');
     if (result?.decision === 'allow') event.completed({ allowEvent: true });
     else if (result?.decision === 'warn' && supportsWarningOverride) event.completed({
       allowEvent: false,
       sendModeOverride: 'promptUser',
-      errorMessage: 'Kalkan DLP hassas veya taranamayan içerik buldu. Göndermeden önce iletiyi kontrol edin.'
+      errorMessage: hasExternalRecipient
+        ? 'İletide şirket dışı alıcı var. Göndermeden önce To, Cc ve Bcc alanlarını kontrol edin.'
+        : 'Kalkan DLP hassas veya taranamayan içerik buldu. Göndermeden önce iletiyi kontrol edin.'
     });
     else event.completed({
       allowEvent: false,
       errorMessage: result?.unreadableAttachments > 0
         ? 'Kalkan DLP bir veya daha fazla eki tarayamadı. Ekleri kontrol edip yeniden deneyin.'
-        : 'Kalkan DLP politikası gönderime izin vermedi. Şirket BT ekibinizle görüşün.'
+        : hasExternalRecipient
+          ? 'Şirket politikası dış alıcıya gönderimi engelledi. To, Cc ve Bcc alanlarını kontrol edin.'
+          : 'Kalkan DLP politikası gönderime izin vermedi. Şirket BT ekibinizle görüşün.'
     });
   } catch {
     event.completed({

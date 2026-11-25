@@ -233,3 +233,19 @@ test('Outlook cannot use a clean decision after the subject or attachment change
     assert.equal(completed[0].allowEvent, false);
   }
 });
+
+test('Outlook explains an external recipient decision without disclosing the address', async () => {
+  const message = item();
+  message.bcc = { getAsync: callback => callback({ status: 'succeeded', value: [{ emailAddress: 'hidden@outside.example' }] }) };
+  for (const mode of ['block', 'audit']) {
+    const decisions = [];
+    await handleOutlookSend({ completed: value => decisions.push(value) }, message,
+      submission => inspectOutlookSubmission(submission, { mode, enabled: [], outlookExternalRecipients: true }, ['corp.example']),
+      15000, true);
+    assert.equal(decisions.length, 1);
+    assert.equal(decisions[0].allowEvent, false);
+    assert.match(decisions[0].errorMessage, /dış/);
+    assert.doesNotMatch(decisions[0].errorMessage, /hidden@outside/);
+    assert.equal(decisions[0].sendModeOverride, mode === 'audit' ? 'promptUser' : undefined);
+  }
+});
