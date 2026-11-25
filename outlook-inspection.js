@@ -29,6 +29,7 @@ async function inspectOutlookMessage(message, policy, internalDomains) {
   const knownDomains = new Set(internalDomains.map(domain => domainToASCII(domain).toLowerCase()));
   const externalRecipients = domains.slice(1).filter(domain => !knownDomains.has(domain)).length;
   const findings = new Set();
+  if (policy.outlookExternalRecipients === true && externalRecipients > 0) findings.add('outlook_external_recipient');
   const scan = value => {
     for (const finding of inspect(value, policy.enabled)) findings.add(finding.type);
   };

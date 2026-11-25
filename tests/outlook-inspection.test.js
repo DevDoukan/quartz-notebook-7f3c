@@ -36,3 +36,19 @@ test('Outlook inspection treats unavailable or unsupported attachments as unread
   }
   await assert.rejects(inspectOutlookMessage({ ...message, bcc: ['unresolved'] }, policy, []), /çözümlenemedi/);
 });
+
+test('Outlook external recipient policy applies to To, Cc and Bcc', async () => {
+  const internal = { ...message, bcc: [] };
+  const enabled = { ...policy, outlookExternalRecipients: true };
+  const domains = ['corp.example'];
+  assert.equal((await inspectOutlookMessage(internal, enabled, domains)).decision, 'allow');
+
+  for (const field of ['to', 'cc', 'bcc']) {
+    const external = { ...internal, [field]: ['recipient@external.example'] };
+    const blocked = await inspectOutlookMessage(external, enabled, domains);
+    assert.equal(blocked.decision, 'block');
+    assert.deepEqual(blocked.rules, ['outlook_external_recipient']);
+    assert.equal((await inspectOutlookMessage(external, { ...enabled, mode: 'audit' }, domains)).decision, 'warn');
+    assert.equal((await inspectOutlookMessage(external, policy, domains)).decision, 'allow');
+  }
+});
